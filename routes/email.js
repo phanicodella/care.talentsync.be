@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const emailService = require('../services/emailService');
+const emailService = require('../services/email.service');
 const admin = require('firebase-admin');
 const AWS = require('aws-sdk');
 const ses = new AWS.SES({ apiVersion: '2010-12-01' });

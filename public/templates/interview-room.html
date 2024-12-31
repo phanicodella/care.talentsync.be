@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview Room</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .chat-message {
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .transcript-text {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <main class="container mx-auto p-4">
+        <!-- Main Content Area -->
+        <div class="flex gap-4 mb-4">
+            <!-- Left Side - Video -->
+            <div class="w-1/2">
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <!-- Square Video Container -->
+                    <div class="aspect-square relative bg-black rounded-lg overflow-hidden">
+                        <video id="userVideo" autoplay muted playsinline 
+                               class="w-full h-full object-cover"></video>
+                        <!-- Video Controls -->
+                        <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 
+                                   bg-black bg-opacity-50 rounded-full px-4 py-2 space-x-4">
+                            <button id="toggleVideo" class="text-white hover:text-gray-300">
+                                <i class="fas fa-video"></i>
+                            </button>
+                            <button id="toggleAudio" class="text-white hover:text-gray-300">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side - Chat Interface -->
+            <div class="w-1/2">
+                <div class="bg-white rounded-lg shadow-lg h-full flex flex-col">
+                    <!-- Chat Header -->
+                    <div class="p-4 border-b">
+                        <h2 class="text-xl font-semibold">Interview Session</h2>
+                        <p class="text-sm text-gray-600" id="interview-type"></p>
+                    </div>
+
+                    <!-- Chat Messages Area -->
+                    <div id="chatArea" class="flex-1 overflow-y-auto p-4 space-y-4" 
+                         style="height: calc(100% - 120px);">
+                        <!-- AI Questions -->
+                        <div class="chat-message bg-blue-50 p-3 rounded-lg max-w-[80%]">
+                            <p class="text-sm text-gray-500 mb-1">AI Interviewer</p>
+                            <p class="text-gray-800">Welcome! I'll be conducting your interview today. 
+                            Please ensure your video and audio are working properly.</p>
+                        </div>
+                        
+                        <!-- Transcribed Responses -->
+                        <div id="transcriptArea"></div>
+                    </div>
+
+                    <!-- Navigation and Recording Status -->
+                    <div class="border-t mt-auto">
+                        <div class="flex justify-between items-center px-4 py-3 bg-gray-50">
+                            <div id="recordingStatus" class="text-sm">
+                                <span class="text-gray-600">
+                                    <i class="fas fa-circle text-red-500 animate-pulse"></i>
+                                    Recording in progress...
+                                </span>
+                            </div>
+                            <button id="nextQuestion" 
+                                    class="bg-blue-500 hover:bg-blue-600 text-white 
+                                           text-sm font-semibold py-2 px-4 rounded-lg">
+                                Next Question
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Information Area -->
+        <div class="grid grid-cols-3 gap-4">
+            <!-- Timer -->
+            <div class="bg-white rounded-lg shadow-lg p-4">
+                <h3 class="text-sm font-semibold text-gray-600">Time Remaining</h3>
+                <p id="timer" class="text-2xl font-bold text-gray-800">00:00</p>
+            </div>
+
+            <!-- Instructions -->
+            <div class="bg-white rounded-lg shadow-lg p-4 col-span-2">
+                <h3 class="text-sm font-semibold text-gray-600">Instructions</h3>
+                <ul class="text-sm text-gray-700 list-disc list-inside">
+                    <li>Speak clearly and at a normal pace</li>
+                    <li>Stay within frame of the video</li>
+                    <li>Click "Next Question" when you've finished your response</li>
+                    <li>Take your time to think before answering</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Main Controls -->
+        <div class="mt-4 flex justify-center space-x-4">
+            <button id="startButton" 
+                    class="bg-green-500 hover:bg-green-600 text-white font-semibold 
+                           py-2 px-6 rounded-lg">
+                Start Interview
+            </button>
+            <button id="endInterview" 
+                    class="bg-red-500 hover:bg-red-600 text-white font-semibold 
+                           py-2 px-6 rounded-lg hidden">
+                End Interview
+            </button>
+        </div>
+
+        <!-- Completion Modal -->
+        <div id="completionModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden">
+            <div class="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
+                        bg-white rounded-lg shadow-xl p-8 max-w-lg w-full">
+                <h2 class="text-2xl font-bold mb-4">Interview Complete</h2>
+                <p class="text-gray-700 mb-6">
+                    Thank you for completing the interview. Your responses have been recorded 
+                    and are being analyzed. You may close this window now.
+                </p>
+                <button onclick="window.close()" 
+                        class="bg-blue-500 hover:bg-blue-600 text-white font-semibold 
+                               py-2 px-4 rounded-lg">
+                    Close Window
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Scripts -->
+    <script src="/js/interview-room.js"></script>
+</body>
+</html>

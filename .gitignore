@@ -84,3 +84,6 @@ serviceAccountKey.json
 *.swp
 *.swo
 *~
+CompleteSourceCode.txt
+cg_cat.py
+BE-CompleteSourceCode.txt

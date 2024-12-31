@@ -3,7 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
-const emailService = require('../services/emailService');
+const emailService = require('../services/email.service');
 
 router.post('/schedule', async (req, res) => {
     try {

@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const openAIService = require('../services/openaiService');
+const openAIService = require('../services/openai.service');
 const admin = require('firebase-admin');
 
 router.post('/generate', async (req, res) => {

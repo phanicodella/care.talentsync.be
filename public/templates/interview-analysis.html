@@ -1,0 +1,204 @@
+<!-- /frontend/interview-analysis.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Analysis - TalentSync</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Custom CSS -->
+    <link href="css/styles.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="index.html">TalentSync</a>
+            <div id="interviewInfo" class="text-white"></div>
+            <button id="leaveMeeting" class="btn btn-outline-light">
+                Leave Meeting
+            </button>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Interview Details Card -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-white">
+                <h4 class="mb-0" id="candidateName">Loading interview details...</h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Date:</strong> <span id="interviewDate"></span></p>
+                        <p><strong>Position:</strong> <span id="interviewPosition"></span></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Status:</strong> <span id="interviewStatus" class="badge bg-primary"></span></p>
+                        <p><strong>Duration:</strong> <span id="interviewDuration"></span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analysis Component -->
+        <div id="analysisContainer"></div>
+
+        <!-- Question Prompts -->
+        <div class="card mt-4 shadow-sm">
+            <div class="card-header bg-white">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">Interview Questions</h4>
+                    <button class="btn btn-outline-primary" id="generateQuestions">
+                        Generate Questions
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <ul class="list-group" id="questionsList">
+                    <li class="list-group-item text-muted">
+                        Click 'Generate Questions' to get AI-powered interview questions
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Error Modal -->
+    <div class="modal fade" id="errorModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">Error</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="errorMessage"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leave Meeting Modal -->
+    <div class="modal fade" id="leaveModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Leave Interview</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to leave this interview?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmLeave">Leave</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <!-- Custom JS -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/interview-analysis.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Get interview ID from URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const interviewId = urlParams.get('id');
+
+            if (!interviewId) {
+                showError('Invalid interview ID');
+                return;
+            }
+
+            // Initialize analysis component
+            const analysis = new InterviewAnalysis('analysisContainer');
+            analysis.interviewId = interviewId;
+
+            // Load interview details
+            loadInterviewDetails(interviewId);
+
+            // Handle leave meeting
+            document.getElementById('leaveMeeting').addEventListener('click', () => {
+                const leaveModal = new bootstrap.Modal(document.getElementById('leaveModal'));
+                leaveModal.show();
+            });
+
+            document.getElementById('confirmLeave').addEventListener('click', () => {
+                window.location.href = 'index.html';
+            });
+
+            // Handle question generation
+            document.getElementById('generateQuestions').addEventListener('click', generateInterviewQuestions);
+        });
+
+        function loadInterviewDetails(interviewId) {
+            const db = firebase.firestore();
+            db.collection('interviews').doc(interviewId).get()
+                .then(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        document.getElementById('candidateName').textContent = data.candidateName;
+                        document.getElementById('interviewDate').textContent = new Date(data.date.toDate()).toLocaleString();
+                        document.getElementById('interviewPosition').textContent = data.position || 'Not specified';
+                        document.getElementById('interviewStatus').textContent = data.status;
+                        document.getElementById('interviewInfo').textContent = `Interview with ${data.candidateName}`;
+                    } else {
+                        showError('Interview not found');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading interview details:', error);
+                    showError('Failed to load interview details');
+                });
+        }
+
+        async function generateInterviewQuestions() {
+            try {
+                const response = await fetch('/api/questions/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        interviewType: 'software-engineer' // You might want to make this dynamic
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to generate questions');
+
+                const data = await response.json();
+                const questionsList = document.getElementById('questionsList');
+                questionsList.innerHTML = data.questions
+                    .map(q => `<li class="list-group-item">${q}</li>`)
+                    .join('');
+            } catch (error) {
+                console.error('Error generating questions:', error);
+                showError('Failed to generate interview questions');
+            }
+        }
+
+        function showError(message) {
+            const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
+            document.getElementById('errorMessage').textContent = message;
+            errorModal.show();
+        }
+    </script>
+</body>
+</html>

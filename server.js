@@ -1,12 +1,11 @@
-// /backend/server.js
-
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
-const WebSocketService = require('./services/websocketService');
+const rateLimit = require('express-rate-limit');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -28,73 +27,88 @@ admin.initializeApp({
 const app = express();
 const server = http.createServer(app);
 
-// Initialize WebSocket Service
-const wss = new WebSocketService(server);
-
-// Security Middleware
+// Security Headers Middleware
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    res.setHeader('Content-Security-Policy', "default-src 'self' https:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https: wss:");
     next();
 });
 
-// Middleware
-app.use(cors({
+// CORS Configuration
+const corsOptions = {
     origin: process.env.NODE_ENV === 'production' 
-        ? 'https://yourdomain.com' 
-        : 'http://localhost:3000',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
-}));
-app.use(bodyParser.json({ limit: '10mb' }));
-app.use(express.static('public'));
+        ? 'https://talentsync.tech'
+        : ['http://localhost:5000', 'http://127.0.0.1:5000'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept'],
+    credentials: true,
+    maxAge: 86400
+};
+app.use(cors(corsOptions));
 
-// Authentication middleware
+// Request Body Parsing
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve static files from public
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Rate Limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100
+});
+app.use('/api/', limiter);
+
+// Authentication Middleware
 const authenticateUser = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             throw new Error('No token provided');
         }
-
         const token = authHeader.split('Bearer ')[1];
         const decodedToken = await admin.auth().verifyIdToken(token);
         req.user = decodedToken;
         next();
     } catch (error) {
         console.error('Auth error:', error);
-        res.status(401).json({ 
-            error: 'Unauthorized',
-            message: process.env.NODE_ENV === 'development' ? error.message : 'Authentication failed'
-        });
+        res.status(401).json({ error: 'Unauthorized' });
     }
 };
 
-// Rate limiting middleware
-const rateLimit = require('express-rate-limit');
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
-
-// Routes
+// API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/feedback', authenticateUser, feedbackRoutes);
 app.use('/api/interviews', authenticateUser, interviewRoutes);
 app.use('/api/email', authenticateUser, emailRoutes);
 app.use('/api/analysis', authenticateUser, analysisRoutes);
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Frontend Routes
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/login.html'));
 });
 
-// Error handling
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/index.html'));
+});
+
+app.get('/interview/:id', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/templates/interview-room.html'));
+});
+
+// Health Check Endpoint
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        env: process.env.NODE_ENV
+    });
+});
+
+// Error Handling
 app.use((err, req, res, next) => {
     console.error(err.stack);
     const statusCode = err.statusCode || 500;
@@ -109,17 +123,28 @@ app.use((req, res) => {
     res.status(404).json({ error: 'Not Found' });
 });
 
-// Start server
+// Start Server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM signal received. Closing server...');
+// Graceful Shutdown
+const gracefulShutdown = () => {
+    console.log('Received shutdown signal. Closing server...');
     server.close(() => {
         console.log('Server closed');
         process.exit(0);
     });
+    setTimeout(() => {
+        console.error('Could not close connections in time, forcefully shutting down');
+        process.exit(1);
+    }, 30000);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    gracefulShutdown();
 });
