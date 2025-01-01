@@ -1,4 +1,4 @@
-// /frontend/js/websocket-client.js
+// backend/websocket-client.js
 
 class WebSocketClient {
     constructor(interviewId, role) {

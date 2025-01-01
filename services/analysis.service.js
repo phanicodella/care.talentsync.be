@@ -11,22 +11,13 @@ class AnalysisService {
         });
     }
 
-    /**
-     * Analyzes video frame for potential fraud
-     * @param {string} frameData - Base64 encoded image frame
-     * @returns {Promise<Object>} Analysis results
-     */
     async analyzeFraudDetection(frameData) {
         try {
-            // Log analysis attempt
-            console.log('Starting fraud detection analysis');
-
-            // Use OpenAI Vision API for analysis
             const response = await this.openai.chat.completions.create({
                 model: "gpt-4-vision-preview",
                 messages: [{
                     role: "system",
-                    content: "You are a fraud detection expert. Analyze this image for signs of interview fraud such as: multiple people, unauthorized devices, screen reflections, or suspicious objects."
+                    content: "Analyze this image for signs of interview fraud such as: multiple people, unauthorized devices, screen reflections, or suspicious objects."
                 }, {
                     role: "user",
                     content: [{
@@ -37,11 +28,9 @@ class AnalysisService {
                 max_tokens: 150
             });
 
-            // Parse response for fraud indicators
             const analysis = response.choices[0].message.content;
             const fraudDetected = this.detectFraudFromAnalysis(analysis);
 
-            // Store analysis result
             await this.storeAnalysisResult({
                 type: 'fraud_detection',
                 result: fraudDetected,
@@ -66,49 +55,48 @@ class AnalysisService {
         }
     }
 
-    /**
-     * Analyzes candidate's response
-     */
-    async analyzeResponse({ transcript, questionId, type, level }) {
+    async analyzeAudioResponse(audioData) {
         try {
-            console.log('Starting response analysis');
-
-            const prompt = this.buildAnalysisPrompt({ transcript, type, level });
+            const audioUrl = await this.uploadAudioToStorage(audioData);
+            const transcript = await this.transcribeAudio(audioUrl);
             
-            const completion = await this.openai.chat.completions.create({
+            const response = await this.openai.chat.completions.create({
                 model: "gpt-4",
                 messages: [{
                     role: "system",
-                    content: "You are an expert at analyzing interview responses. Provide detailed, fair analysis."
+                    content: "Analyze this interview response for authenticity, clarity, and potential fraud indicators."
                 }, {
                     role: "user",
-                    content: prompt
+                    content: transcript
                 }],
-                temperature: 0.3,
-                max_tokens: 1000
+                temperature: 0.3
             });
 
-            const analysis = this.parseAnalysis(completion.choices[0].message.content);
-
-            // Store analysis result
-            await this.storeAnalysisResult({
-                type: 'response_analysis',
-                questionId,
-                analysis,
-                timestamp: admin.firestore.FieldValue.serverTimestamp()
-            });
-
-            return analysis;
+            return {
+                transcript,
+                analysis: response.choices[0].message.content,
+                fraudProbability: this.calculateFraudProbability(response.choices[0].message.content)
+            };
         } catch (error) {
-            console.error('Response analysis error:', error);
-            throw new Error('Failed to analyze response');
+            console.error('Audio analysis error:', error);
+            throw error;
         }
     }
 
-    /**
-     * Detects fraud indicators from OpenAI analysis
-     * @private
-     */
+    async transcribeAudio(audioUrl) {
+        try {
+            const response = await this.openai.audio.transcriptions.create({
+                file: audioUrl,
+                model: "whisper-1",
+                language: "en"
+            });
+            return response.text;
+        } catch (error) {
+            console.error('Transcription error:', error);
+            throw error;
+        }
+    }
+
     detectFraudFromAnalysis(analysis) {
         const fraudIndicators = [
             'multiple people',
@@ -135,61 +123,48 @@ class AnalysisService {
         };
     }
 
-    /**
-     * Builds prompt for response analysis
-     * @private
-     */
-    buildAnalysisPrompt({ transcript, type, level }) {
-        return `Analyze the following ${level} level ${type} interview response:
-                \n---\n${transcript}\n---\n
-                Provide analysis in JSON format with the following criteria:
-                - completeness (0-100)
-                - accuracy (0-100)
-                - clarity (0-100)
-                - technicalDepth (0-100)
-                - overallScore (0-100)
-                - strengths (array of strings)
-                - improvementAreas (array of strings)
-                - notes (string with detailed feedback)`;
+    calculateFraudProbability(analysisText) {
+        const fraudKeywords = [
+            'hesitation',
+            'unnatural pauses',
+            'reading',
+            'prompted',
+            'assisted',
+            'inconsistent'
+        ];
+
+        let fraudScore = 0;
+        fraudKeywords.forEach(keyword => {
+            if (analysisText.toLowerCase().includes(keyword)) {
+                fraudScore += 1;
+            }
+        });
+
+        return fraudScore / fraudKeywords.length;
     }
 
-    /**
-     * Parses analysis from OpenAI response
-     * @private
-     */
-    parseAnalysis(content) {
+    async uploadAudioToStorage(audioData) {
         try {
-            // Extract JSON from response
-            const jsonStr = content.substring(
-                content.indexOf('{'),
-                content.lastIndexOf('}') + 1
-            );
-            
-            const analysis = JSON.parse(jsonStr);
-            
-            // Validate required fields
-            const requiredFields = [
-                'completeness', 'accuracy', 'clarity',
-                'technicalDepth', 'overallScore'
-            ];
-            
-            for (const field of requiredFields) {
-                if (!(field in analysis)) {
-                    throw new Error(`Missing required field: ${field}`);
-                }
-            }
+            const bucket = admin.storage().bucket();
+            const filename = `interviews/audio/${Date.now()}.wav`;
+            const file = bucket.file(filename);
 
-            return analysis;
+            await file.save(audioData, {
+                contentType: 'audio/wav'
+            });
+
+            const [url] = await file.getSignedUrl({
+                action: 'read',
+                expires: Date.now() + 3600 * 1000 // 1 hour
+            });
+
+            return url;
         } catch (error) {
-            console.error('Analysis parsing error:', error);
-            throw new Error('Failed to parse analysis from OpenAI response');
+            console.error('Audio upload error:', error);
+            throw error;
         }
     }
 
-    /**
-     * Stores analysis result in Firebase
-     * @private
-     */
     async storeAnalysisResult(data) {
         try {
             await admin.firestore()
@@ -200,7 +175,6 @@ class AnalysisService {
                 });
         } catch (error) {
             console.error('Error storing analysis result:', error);
-            // Don't throw - this is a non-critical operation
         }
     }
 }

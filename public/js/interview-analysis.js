@@ -1,4 +1,4 @@
-// /frontend/js/interview-analysis.js
+// backend/interview-analysis.js
 
 class InterviewAnalysis {
     constructor(containerId) {

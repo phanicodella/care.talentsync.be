@@ -1,4 +1,4 @@
-// /frontend/js/modules/VideoManager.js
+// backend/modules/VideoManager.js
 export class VideoManager {
     constructor(containerElement) {
         this.containerElement = containerElement;

@@ -1,4 +1,4 @@
-// /frontend/js/calendar.js
+// backend/calendar.js
 
 class CalendarService {
     static generateICSFile(interview) {

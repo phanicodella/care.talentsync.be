@@ -1,4 +1,4 @@
-// /frontend/js/feedback.js
+// backend/feedback.js
 class FeedbackService {
     static #API_URL = '/api/feedback';
 

@@ -1,64 +1,51 @@
+// /backend/server.js
+
 require('dotenv').config();
+const winston = require('winston');
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const admin = require('firebase-admin');
+const { initializeFirebaseAdmin } = require('./config/firebase-config');
 const rateLimit = require('express-rate-limit');
-
-// Import routes
-const authRoutes = require('./routes/auth');
-const feedbackRoutes = require('./routes/feedback');
-const interviewRoutes = require('./routes/interviews');
-const emailRoutes = require('./routes/email');
-const analysisRoutes = require('./routes/analysis');
+const WebSocket = require('ws');
+const { verifySESSetup, verifyEmailSender } = require('./config/aws');
 
 // Initialize Firebase Admin
-admin.initializeApp({
-    credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-    }),
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET
-});
+const firebaseConfig = initializeFirebaseAdmin();
 
 const app = express();
 const server = http.createServer(app);
 
-// Security Headers Middleware
+// WebSocket server
+const wss = new WebSocket.Server({ server });
+
+// Middleware
+app.use(cors({
+    origin: process.env.NODE_ENV === 'production' 
+        ? 'https://talentsync.tech'
+        : ['http://localhost:5000', 'http://127.0.0.1:5000', 'http://localhost:3000'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Security middleware
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     next();
 });
 
-// CORS Configuration
-const corsOptions = {
-    origin: process.env.NODE_ENV === 'production' 
-        ? 'https://talentsync.tech'
-        : ['http://localhost:5000', 'http://127.0.0.1:5000'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept'],
-    credentials: true,
-    maxAge: 86400
-};
-app.use(cors(corsOptions));
-
-// Request Body Parsing
+// Body parsing
 app.use(bodyParser.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve static files from public
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Rate Limiting
+// Rate limiting
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
 });
 app.use('/api/', limiter);
 
@@ -67,84 +54,136 @@ const authenticateUser = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            throw new Error('No token provided');
+            return res.status(401).json({ error: 'No token provided' });
         }
+
         const token = authHeader.split('Bearer ')[1];
-        const decodedToken = await admin.auth().verifyIdToken(token);
+        const decodedToken = await firebaseConfig.admin.auth().verifyIdToken(token);
         req.user = decodedToken;
         next();
     } catch (error) {
-        console.error('Auth error:', error);
+        console.error('Authentication error:', error);
         res.status(401).json({ error: 'Unauthorized' });
     }
 };
 
-// API Routes
+// Import routes
+const authRoutes = require('./routes/auth');
+const interviewRoutes = require('./routes/interviews');
+const analysisRoutes = require('./routes/analysis');
+const questionRoutes = require('./routes/questions');
+
+// Route registration
 app.use('/api/auth', authRoutes);
-app.use('/api/feedback', authenticateUser, feedbackRoutes);
-app.use('/api/interviews', authenticateUser, interviewRoutes);
-app.use('/api/email', authenticateUser, emailRoutes);
+app.use('/api/interviews', interviewRoutes); // Remove authenticateUser for interview routes
 app.use('/api/analysis', authenticateUser, analysisRoutes);
+app.use('/api/questions', questionRoutes);
 
-// Frontend Routes
-app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/login.html'));
+// Serve static files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// WebSocket connection handling
+wss.on('connection', (ws) => {
+    console.log('WebSocket client connected');
+
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message);
+            // Basic WebSocket message handling
+            switch(data.type) {
+                case 'interview_start':
+                    console.log('Interview started');
+                    break;
+                case 'candidate_response':
+                    console.log('Candidate response received');
+                    break;
+                case 'fraud_detection':
+                    console.log('Fraud detection update');
+                    break;
+            }
+        } catch (error) {
+            console.error('WebSocket message error:', error);
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('WebSocket client disconnected');
+    });
 });
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/index.html'));
-});
-
-app.get('/interview/:id', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/templates/interview-room.html'));
-});
-
-// Health Check Endpoint
+// Health check route
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        env: process.env.NODE_ENV
+        environment: process.env.NODE_ENV
     });
 });
 
-// Error Handling
+// Interview room route - IMPORTANT: This must come before the catch-all route
+app.get('/interview/:id', (req, res) => {
+    console.log(`Serving interview room for ID: ${req.params.id}`);
+    res.sendFile(path.join(__dirname, 'public', 'templates', 'interview-room.html'));
+});
+
+// Serve interview room
+app.get('/interview-room', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'templates', 'interview-room.html'));
+});
+
+// Catch-all route for frontend routing
+app.get('*', (req, res) => {
+    // Don't redirect interview routes
+    if (req.path.startsWith('/interview/')) {
+        res.sendFile(path.join(__dirname, 'public', 'templates', 'interview-room.html'));
+    } else {
+        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    }
+});
+
+// Error handling middleware
 app.use((err, req, res, next) => {
     console.error(err.stack);
-    const statusCode = err.statusCode || 500;
-    res.status(statusCode).json({ 
-        error: 'Internal server error',
-        message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    res.status(500).json({ 
+        error: 'Something went wrong', 
+        message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
     });
 });
 
-// Handle 404
-app.use((req, res) => {
-    res.status(404).json({ error: 'Not Found' });
-});
-
-// Start Server
+// Server startup
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server is running at http://localhost:${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
+});
+// logger:
+const logger = winston.createLogger({
+    level: 'debug',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+    ),
+    transports: [
+        new winston.transports.File({ filename: 'error.log', level: 'error' }),
+        new winston.transports.File({ filename: 'combined.log' }),
+        new winston.transports.Console({
+            format: winston.format.combine(
+                winston.format.colorize(),
+                winston.format.simple()
+            )
+        })
+    ]
 });
 
-// Graceful Shutdown
-const gracefulShutdown = () => {
-    console.log('Received shutdown signal. Closing server...');
+global.logger = logger;
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received. Shutting down gracefully');
     server.close(() => {
-        console.log('Server closed');
+        console.log('Process terminated');
         process.exit(0);
     });
-    setTimeout(() => {
-        console.error('Could not close connections in time, forcefully shutting down');
-        process.exit(1);
-    }, 30000);
-};
-
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
-    gracefulShutdown();
 });
+
+module.exports = app;
